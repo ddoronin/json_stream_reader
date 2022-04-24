@@ -1,0 +1,14 @@
+[package]
+name = "json_stream_reader"
+version = "0.1.0"
+authors = ["Dima Doronin <doronindm@gmail.com>"]
+license = "MIT"
+description = "A lightning fast no memory overhead json stream reader."
+edition = "2021"
+readme = "README.md"
+repository = "https://github.com/ddoronin/json_stream_reader"
+keywords = ["json", "reader", "stream"]
+include = ["src/**/*.rs", "README.md", "LICENSE"]
+
+[dependencies]
+lazy_static = "1.4.0"
