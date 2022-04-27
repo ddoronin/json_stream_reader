@@ -1,18 +1,18 @@
-use std::collections::HashSet;
-use std::str;
-
 use crate::constants::{DIGIT_CHAR_SET, EMPTY_CHAR_SET};
 use crate::error::{Error, ErrorCode};
 use crate::token::*;
-use crate::utils::squash;
 
 pub(crate) fn handle_none<O, A>(
     buf: &[u8],
     i: usize,
     tokens: &mut Vec<Token>,
     mut on_obj_beg: O,
-    mut on_arr_beg: A
-) -> Option<Error> where O: FnMut(), A:FnMut() {
+    mut on_arr_beg: A,
+) -> Option<Error>
+where
+    O: FnMut(),
+    A: FnMut(),
+{
     let mut error: Option<Error> = None;
     match buf[i] {
         b'{' => {
@@ -39,7 +39,11 @@ pub(crate) fn handle_colon<F1, F2>(
     tokens: &mut Vec<Token>,
     mut on_obj_beg: F1,
     mut on_arr_beg: F2,
-) -> Option<Error> where F1: FnMut(), F2: FnMut() {
+) -> Option<Error>
+where
+    F1: FnMut(),
+    F2: FnMut(),
+{
     let mut error: Option<Error> = None;
     match buf[i] {
         b'n' => tokens.push(Token::Null(vec![b'n'])),
@@ -54,7 +58,7 @@ pub(crate) fn handle_colon<F1, F2>(
             tokens.push(Token::Arr);
             on_arr_beg();
         }
-        ch if EMPTY_CHAR_SET.contains(&ch) => {},
+        ch if EMPTY_CHAR_SET.contains(&ch) => {}
         ch if DIGIT_CHAR_SET.contains(&ch) => tokens.push(Token::Number(vec![ch])),
         _ => {
             error = Some(Error {
@@ -72,7 +76,11 @@ pub(crate) fn handle_nil_token<O, A>(
     tokens: &mut Vec<Token>,
     mut on_obj_end: O,
     mut on_arr_end: A,
-) -> Option<Error> where O: FnMut(), A: FnMut() {
+) -> Option<Error>
+where
+    O: FnMut(),
+    A: FnMut(),
+{
     let mut error: Option<Error> = None;
     match buf[i] {
         ch if EMPTY_CHAR_SET.contains(&ch) => {}
@@ -101,7 +109,11 @@ pub(crate) fn handle_comma<O, A>(
     tokens: &mut Vec<Token>,
     mut on_obj_beg: O,
     mut on_arr_beg: A,
-) -> Option<Error> where O: FnMut(), A: FnMut() {
+) -> Option<Error>
+where
+    O: FnMut(),
+    A: FnMut(),
+{
     let mut error: Option<Error> = None;
     match buf[i] {
         ch if EMPTY_CHAR_SET.contains(&ch) => {}
@@ -170,7 +182,12 @@ mod colon {
         let buf = "{\"foo\": null}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
             handle_colon(buf, i, &mut tokens, || {}, || {});
@@ -184,7 +201,12 @@ mod colon {
         let buf = "{\"foo\": true}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
             handle_colon(buf, i, &mut tokens, || {}, || {});
@@ -198,7 +220,12 @@ mod colon {
         let buf = "{\"foo\": false}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
             handle_colon(buf, i, &mut tokens, || {}, || {});
@@ -212,7 +239,12 @@ mod colon {
         let buf = "{\"foo\": \"bar\"}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
             handle_colon(buf, i, &mut tokens, || {}, || {});
@@ -226,7 +258,12 @@ mod colon {
         let buf = "{\"foo\": 42}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
             handle_colon(buf, i, &mut tokens, || {}, || {});
@@ -240,12 +277,17 @@ mod colon {
         let buf = "{\"foo\": {\"bar\": \"zar\"}}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         let mut is_obj = false;
         let mut is_arr = false;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {is_obj = true}, || {is_arr = true});
+            handle_colon(buf, i, &mut tokens, || is_obj = true, || is_arr = true);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Obj));
@@ -258,12 +300,17 @@ mod colon {
         let buf = "{\"foo\": [\"bar\", \"zar\"]}".as_bytes();
         //                        ^______ after colon
         //               01_2345_67890
-        let mut tokens = vec![Token::Obj, Token::Key("foo".as_bytes().to_vec()), Token::AfterKey, Token::Colon];
+        let mut tokens = vec![
+            Token::Obj,
+            Token::Key("foo".as_bytes().to_vec()),
+            Token::AfterKey,
+            Token::Colon,
+        ];
         let mut i = 7;
         let mut is_obj = false;
         let mut is_arr = false;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {is_obj = true}, || {is_arr = true});
+            handle_colon(buf, i, &mut tokens, || is_obj = true, || is_arr = true);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Arr));

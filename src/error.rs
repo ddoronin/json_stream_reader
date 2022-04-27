@@ -54,7 +54,7 @@ pub enum ErrorCode {
     TooManyTokens,
 
     /// The array is invalid. It started with [ followed by an invalid character.
-    InvalidArrFormat
+    InvalidArrFormat,
 }
 
 #[derive(Debug, PartialEq)]
