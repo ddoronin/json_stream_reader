@@ -11,6 +11,9 @@ pub enum ErrorCode {
     /// Expected a key "foo".
     ExpectedKey,
 
+    /// Expected a number.
+    ExpectedNumber,
+
     /// Expected this character to be either a `'{'` or a `'['`.
     ExpectedObjectOrArray,
 

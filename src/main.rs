@@ -1,6 +1,5 @@
-// #[macro_use]
-// extern crate lazy_static;
 use json_stream_reader::json_stream_reader::*;
+use json_stream_reader::json_token::JsonToken;
 use json_stream_reader::json_value::JsonValue;
 use std::env;
 use std::fs::File;
@@ -19,37 +18,37 @@ fn main() {
     let mut reader = JsonStreamReader::new();
     while let Ok(size) = file.read(&mut buf) {
         if size > 0 {
-            let res = reader.read(
-                &buf[0..size],
-                || {
-                    r.borrow_mut().push("{".to_string());
-                },
-                || {
-                    r.borrow_mut().push("}".to_string());
-                },
-                || {
-                    r.borrow_mut().push("[".to_string());
-                },
-                || {
-                    r.borrow_mut().push("]".to_string());
-                },
-                |obj_key: &str| {
-                    r.borrow_mut()
-                        .push(format!("key: {:}", obj_key.to_string()));
-                },
-                |obj_val: JsonValue| {
-                    let s = match obj_val {
-                        JsonValue::String(str) => format!("str: {:}", str),
-                        JsonValue::Number(str) => format!("num: {:}", str.parse::<f32>().unwrap()),
-                        JsonValue::Bool(b) => format!("bool: {:}", b),
-                        JsonValue::Null => "null".to_string(),
-                    };
-                    r.borrow_mut().push(s);
-                },
-            );
-            if res.is_err() {
-                println!("{:?}", res.err());
-                break;
+            let res = reader.read(&buf[0..size]);
+            match res {
+                Ok(tokens) => {
+                    for token in tokens {
+                        match token {
+                            JsonToken::ObjBeg => r.borrow_mut().push("{".to_string()),
+                            JsonToken::ObjEnd => r.borrow_mut().push("}".to_string()),
+                            JsonToken::ArrBeg => r.borrow_mut().push("[".to_string()),
+                            JsonToken::ArrEnd => r.borrow_mut().push("]".to_string()),
+                            JsonToken::Key(obj_key) => r
+                                .borrow_mut()
+                                .push(format!("key: {:}", obj_key.to_string())),
+                            JsonToken::Val(JsonValue::String(str)) => {
+                                r.borrow_mut().push(format!("str: {:}", str))
+                            }
+                            JsonToken::Val(JsonValue::Number(str)) => r
+                                .borrow_mut()
+                                .push(format!("num: {:}", str.parse::<f32>().unwrap())),
+                            JsonToken::Val(JsonValue::Bool(b)) => {
+                                r.borrow_mut().push(format!("bool: {:}", b))
+                            }
+                            JsonToken::Val(JsonValue::Null) => {
+                                r.borrow_mut().push("null".to_string())
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    println!("{:?}", err);
+                    break;
+                }
             }
         } else {
             break;

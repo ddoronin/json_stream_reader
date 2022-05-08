@@ -1,158 +1,138 @@
 use crate::constants::{DIGIT_CHAR_SET, EMPTY_CHAR_SET};
 use crate::error::{Error, ErrorCode};
+use crate::json_token::JsonToken;
 use crate::token::*;
 
-pub(crate) fn handle_none<O, A>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_beg: O,
-    mut on_arr_beg: A,
-) -> Option<Error>
-where
-    O: FnMut(),
-    A: FnMut(),
-{
-    let mut error: Option<Error> = None;
-    match buf[i] {
-        b'{' => {
-            on_obj_beg();
-            tokens.push(Token::Obj);
-        }
-        b'[' => {
-            on_arr_beg();
-            tokens.push(Token::Arr);
-        }
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::ExpectedObjectOrArray,
-            })
-        }
-    }
-    error
-}
+type Res = Result<Option<JsonToken>, Error>;
 
-pub(crate) fn handle_colon<F1, F2>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_beg: F1,
-    mut on_arr_beg: F2,
-) -> Option<Error>
-where
-    F1: FnMut(),
-    F2: FnMut(),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_none(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match buf[i] {
-        b'n' => tokens.push(Token::Null(vec![b'n'])),
-        b't' => tokens.push(Token::True(vec![b't'])),
-        b'f' => tokens.push(Token::False(vec![b'f'])),
-        b'"' => tokens.push(Token::String(vec![])),
         b'{' => {
             tokens.push(Token::Obj);
-            on_obj_beg();
+            Ok(Some(JsonToken::ObjBeg))
         }
         b'[' => {
             tokens.push(Token::Arr);
-            on_arr_beg();
+            Ok(Some(JsonToken::ArrBeg))
         }
-        ch if EMPTY_CHAR_SET.contains(&ch) => {}
-        ch if DIGIT_CHAR_SET.contains(&ch) => tokens.push(Token::Number(vec![ch])),
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::ExpectedColon,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::ExpectedObjectOrArray,
+        }),
     }
-    error
 }
 
-pub(crate) fn handle_nil_token<O, A>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_end: O,
-    mut on_arr_end: A,
-) -> Option<Error>
-where
-    O: FnMut(),
-    A: FnMut(),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_colon(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match buf[i] {
-        ch if EMPTY_CHAR_SET.contains(&ch) => {}
-        b',' => tokens.push(Token::Comma),
+        b'n' => {
+            tokens.push(Token::Null(vec![b'n']));
+            Ok(None)
+        }
+        b't' => {
+            tokens.push(Token::True(vec![b't']));
+            Ok(None)
+        }
+        b'f' => {
+            tokens.push(Token::False(vec![b'f']));
+            Ok(None)
+        }
+        b'"' => {
+            tokens.push(Token::String(vec![]));
+            Ok(None)
+        }
+        b'{' => {
+            tokens.push(Token::Obj);
+            Ok(Some(JsonToken::ObjBeg))
+        }
+        b'[' => {
+            tokens.push(Token::Arr);
+            Ok(Some(JsonToken::ArrBeg))
+        }
+        ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
+        ch if DIGIT_CHAR_SET.contains(&ch) => {
+            tokens.push(Token::Number(vec![ch]));
+            Ok(None)
+        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::ExpectedColon,
+        }),
+    }
+}
+
+pub(crate) fn handle_nil_token(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
+    match buf[i] {
+        ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
+        b',' => {
+            tokens.push(Token::Comma);
+            Ok(None)
+        }
         b']' => {
             handle_end_arr(tokens);
-            on_arr_end();
+            Ok(Some(JsonToken::ArrEnd))
         }
         b'}' => {
             handle_end_obj(tokens);
-            on_obj_end();
+            Ok(Some(JsonToken::ObjEnd))
         }
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::ExpectedCommaOrObjectEndOrArrayEnd,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::ExpectedCommaOrObjectEndOrArrayEnd,
+        }),
     }
-    error
 }
 
-pub(crate) fn handle_comma<O, A>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_beg: O,
-    mut on_arr_beg: A,
-) -> Option<Error>
-where
-    O: FnMut(),
-    A: FnMut(),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_comma(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match buf[i] {
-        ch if EMPTY_CHAR_SET.contains(&ch) => {}
-        ch if DIGIT_CHAR_SET.contains(&ch) => tokens.push(Token::Number(vec![ch])),
-        b'n' => tokens.push(Token::Null(vec![b'n'])),
-        b't' => tokens.push(Token::True(vec![b't'])),
-        b'f' => tokens.push(Token::False(vec![b'f'])),
+        ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
+        ch if DIGIT_CHAR_SET.contains(&ch) => {
+            tokens.push(Token::Number(vec![ch]));
+            Ok(None)
+        }
+        b'n' => {
+            tokens.push(Token::Null(vec![b'n']));
+            Ok(None)
+        }
+        b't' => {
+            tokens.push(Token::True(vec![b't']));
+            Ok(None)
+        }
+        b'f' => {
+            tokens.push(Token::False(vec![b'f']));
+            Ok(None)
+        }
         b'"' => {
             let mut cursor = tokens.len();
             while cursor > 0 {
                 match tokens[cursor - 1] {
                     Token::Arr => {
+                        // ["foo"]
                         tokens.push(Token::String(vec![]));
                         break;
                     }
                     Token::Obj => {
+                        // {"foo": "bar"}
                         tokens.push(Token::Key(vec![]));
                         break;
                     }
                     _ => cursor -= 1,
                 }
             }
+            Ok(None)
         }
         b'{' => {
             tokens.push(Token::Obj);
-            on_obj_beg();
+            Ok(Some(JsonToken::ObjBeg))
         }
         b'[' => {
             tokens.push(Token::Arr);
-            on_arr_beg();
+            Ok(Some(JsonToken::ArrBeg))
         }
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::ExpectedAnyTerm,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::ExpectedAnyTerm,
+        }),
     }
-    error
 }
 
 fn handle_end_obj(tokens: &mut Vec<Token>) {
@@ -180,8 +160,8 @@ mod colon {
     #[test]
     fn should_expect_null() {
         let buf = "{\"foo\": null}".as_bytes();
-        //                        ^______ after colon
-        //               01_2345_67890
+        //         ^______ after colon
+        //         01_2345_67890
         let mut tokens = vec![
             Token::Obj,
             Token::Key("foo".as_bytes().to_vec()),
@@ -190,7 +170,7 @@ mod colon {
         ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {}, || {});
+            handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Null("n".as_bytes().to_vec())));
@@ -209,7 +189,7 @@ mod colon {
         ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {}, || {});
+            handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::True("t".as_bytes().to_vec())));
@@ -228,7 +208,7 @@ mod colon {
         ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {}, || {});
+            handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::False("f".as_bytes().to_vec())));
@@ -247,7 +227,7 @@ mod colon {
         ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {}, || {});
+            handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::String(vec![])));
@@ -266,7 +246,7 @@ mod colon {
         ];
         let mut i = 7;
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || {}, || {});
+            handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Number("4".as_bytes().to_vec())));
@@ -286,13 +266,13 @@ mod colon {
         let mut i = 7;
         let mut is_obj = false;
         let mut is_arr = false;
+        let mut res = Ok(None);
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || is_obj = true, || is_arr = true);
+            res = handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Obj));
-        assert_eq!(is_obj, true);
-        assert_eq!(is_arr, false);
+        assert_eq!(res, Ok(Some(JsonToken::ObjBeg)));
     }
 
     #[test]
@@ -307,14 +287,12 @@ mod colon {
             Token::Colon,
         ];
         let mut i = 7;
-        let mut is_obj = false;
-        let mut is_arr = false;
+        let mut res = Ok(None);
         while i < buf.len() && tokens.last() == Some(&Token::Colon) {
-            handle_colon(buf, i, &mut tokens, || is_obj = true, || is_arr = true);
+            res = handle_colon(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Arr));
-        assert_eq!(is_obj, false);
-        assert_eq!(is_arr, true);
+        assert_eq!(res, Ok(Some(JsonToken::ArrBeg)));
     }
 }

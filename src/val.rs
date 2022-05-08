@@ -2,198 +2,194 @@ use std::str;
 
 use crate::constants::{DIGIT_CHAR_SET, EMPTY_CHAR_SET};
 use crate::error::{Error, ErrorCode};
+use crate::json_token::JsonToken;
 use crate::json_value::JsonValue;
 use crate::token::*;
 use crate::utils::squash;
 
-pub(crate) fn handle_string<F>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_val: F,
-) -> Option<Error>
-where
-    F: FnMut(JsonValue),
-{
-    let mut error: Option<Error> = None;
+type Res = Result<Option<JsonToken>, Error>;
+
+pub(crate) fn handle_string(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match tokens.last_mut() {
         Some(Token::String(ref mut data)) => match buf[i] {
             // escaped chars
-            b'\\' if data.last() == Some(&b'\\') => data.push(0),
-            b'"' if data.last() == Some(&b'\\') => data.push(b'"'),
+            b'\\' if data.last() == Some(&b'\\') => {
+                data.push(0);
+                Ok(None)
+            }
+            b'"' if data.last() == Some(&b'\\') => {
+                data.push(b'"');
+                Ok(None)
+            }
             b'"' => {
                 let v = data
                     .clone()
                     .into_iter()
                     .filter(|&ch| ch != 0)
                     .collect::<Vec<u8>>();
-                let val = str::from_utf8(&v).unwrap();
-                on_val(JsonValue::String(val.to_string()));
+
                 squash(tokens);
                 tokens.push(Token::None);
+
+                match str::from_utf8(&v) {
+                    Ok(val) => Ok(Some(JsonToken::Val(JsonValue::String(val.to_string())))),
+                    Err(_) => Err(Error {
+                        column: i,
+                        code: ErrorCode::InvalidFormat,
+                    }),
+                }
             }
-            ch => data.push(ch),
+            ch => {
+                data.push(ch);
+                Ok(None)
+            }
         },
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::InvalidFormat,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::InvalidFormat,
+        }),
     }
-    error
 }
 
-pub(crate) fn handle_number<V, A, O>(
+pub(crate) fn handle_number(
     buf: &[u8],
     i: usize,
     tokens: &mut Vec<Token>,
-    mut on_val: V,
-    mut on_arr_end: A,
-    mut on_obj_end: O,
-) -> Option<Error>
-where
-    V: FnMut(JsonValue),
-    A: FnMut(),
-    O: FnMut(),
-{
-    let mut error: Option<Error> = None;
+) -> Result<Option<(JsonToken, Option<JsonToken>)>, Error> {
     if let Some(Token::Number(ref mut data)) = tokens.last_mut() {
         match buf[i] {
-            b'.' if !data.contains(&b'.') => data.push(b'.'),
+            b'.' if !data.contains(&b'.') => {
+                data.push(b'.');
+                Ok(None)
+            }
             b',' => {
-                on_val(JsonValue::Number(
+                let val = JsonToken::Val(JsonValue::Number(
                     str::from_utf8(&data).unwrap().to_string(),
                 ));
                 squash(tokens);
                 tokens.push(Token::Comma);
+                Ok(Some((val, None)))
             }
             b']' => {
-                on_val(JsonValue::Number(
+                let val = JsonToken::Val(JsonValue::Number(
                     str::from_utf8(&data).unwrap().to_string(),
                 ));
                 squash(tokens);
                 handle_end_arr(tokens);
-                on_arr_end();
+                Ok(Some((val, Some(JsonToken::ArrEnd))))
             }
             b'}' => {
-                on_val(JsonValue::Number(
+                let val = JsonToken::Val(JsonValue::Number(
                     str::from_utf8(&data).unwrap().to_string(),
                 ));
                 squash(tokens);
                 handle_end_obj(tokens);
-                on_obj_end();
+                Ok(Some((val, Some(JsonToken::ObjEnd))))
             }
-            ch if DIGIT_CHAR_SET.contains(&ch) => data.push(ch),
+            ch if DIGIT_CHAR_SET.contains(&ch) => {
+                data.push(ch);
+                Ok(None)
+            }
             ch if EMPTY_CHAR_SET.contains(&ch) => {
-                on_val(JsonValue::Number(
+                let val = JsonToken::Val(JsonValue::Number(
                     str::from_utf8(&data).unwrap().to_string(),
                 ));
                 squash(tokens);
                 tokens.push(Token::None);
+                Ok(Some((val, None)))
             }
-            _ => {
-                error = Some(Error {
-                    column: i,
-                    code: ErrorCode::InvalidNumber,
-                })
-            }
+            _ => Err(Error {
+                column: i,
+                code: ErrorCode::InvalidNumber,
+            }),
         }
+    } else {
+        Ok(None)
     }
-    error
 }
 
-pub(crate) fn handle_null<V>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_val: V,
-) -> Option<Error>
-where
-    V: FnMut(JsonValue),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_null(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     if let Some(Token::Null(ref mut data)) = tokens.last_mut() {
         match buf[i] {
-            b'u' if *data == [b'n'] => data.push(b'u'),
-            b'l' if *data == [b'n', b'u'] => data.push(b'l'),
+            b'u' if *data == [b'n'] => {
+                data.push(b'u');
+                Ok(None)
+            }
+            b'l' if *data == [b'n', b'u'] => {
+                data.push(b'l');
+                Ok(None)
+            }
             b'l' if *data == [b'n', b'u', b'l'] => {
-                on_val(JsonValue::Null);
                 squash(tokens);
                 tokens.push(Token::None);
+                Ok(Some(JsonToken::Val(JsonValue::Null)))
             }
-            _ => {
-                error = Some(Error {
-                    column: i,
-                    code: ErrorCode::ExpectedNull,
-                })
-            }
+            _ => Err(Error {
+                column: i,
+                code: ErrorCode::ExpectedNull,
+            }),
         }
+    } else {
+        Ok(None)
     }
-    error
 }
 
-pub(crate) fn handle_true<V>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_val: V,
-) -> Option<Error>
-where
-    V: FnMut(JsonValue),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_true(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     if let Some(Token::True(ref mut data)) = tokens.last_mut() {
         match buf[i] {
-            b'r' if *data == [b't'] => data.push(b'r'),
-            b'u' if *data == [b't', b'r'] => data.push(b'u'),
+            b'r' if *data == [b't'] => {
+                data.push(b'r');
+                Ok(None)
+            }
+            b'u' if *data == [b't', b'r'] => {
+                data.push(b'u');
+                Ok(None)
+            }
             b'e' if *data == [b't', b'r', b'u'] => {
                 data.push(b'e');
-                on_val(JsonValue::Bool(true));
                 squash(tokens);
                 tokens.push(Token::None);
+                Ok(Some(JsonToken::Val(JsonValue::Bool(true))))
             }
-            _ => {
-                error = Some(Error {
-                    column: i,
-                    code: ErrorCode::ExpectedTrue,
-                })
-            }
+            _ => Err(Error {
+                column: i,
+                code: ErrorCode::ExpectedTrue,
+            }),
         }
+    } else {
+        Ok(None)
     }
-    error
 }
 
-pub(crate) fn handle_false<V>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_val: V,
-) -> Option<Error>
-where
-    V: FnMut(JsonValue),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_false(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     if let Some(Token::False(ref mut data)) = tokens.last_mut() {
         match buf[i] {
-            b'a' if *data == [b'f'] => data.push(b'a'),
-            b'l' if *data == [b'f', b'a'] => data.push(b'l'),
-            b's' if *data == [b'f', b'a', b'l'] => data.push(b's'),
+            b'a' if *data == [b'f'] => {
+                data.push(b'a');
+                Ok(None)
+            }
+            b'l' if *data == [b'f', b'a'] => {
+                data.push(b'l');
+                Ok(None)
+            }
+            b's' if *data == [b'f', b'a', b'l'] => {
+                data.push(b's');
+                Ok(None)
+            }
             b'e' if *data == [b'f', b'a', b'l', b's'] => {
                 data.push(b'e');
-                on_val(JsonValue::Bool(false));
                 squash(tokens);
                 tokens.push(Token::None);
+                Ok(Some(JsonToken::Val(JsonValue::Bool(false))))
             }
-            _ => {
-                error = Some(Error {
-                    column: i,
-                    code: ErrorCode::ExpectedFalse,
-                })
-            }
+            _ => Err(Error {
+                column: i,
+                code: ErrorCode::ExpectedFalse,
+            }),
         }
+    } else {
+        Ok(None)
     }
-    error
 }
 
 fn handle_end_obj(tokens: &mut Vec<Token>) {
@@ -223,16 +219,15 @@ mod handle_string_tests {
         let buf = "\"foo\"".as_bytes();
         let mut tokens = vec![Token::String(vec![])];
         let mut i = 1;
-        let mut res = String::new();
-        while i < buf.len() {
-            handle_string(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::String(str) = val {
-                    res = str;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_string(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(res, "foo");
+        assert_eq!(
+            res,
+            Ok(Some(JsonToken::Val(JsonValue::String("foo".to_string()))))
+        );
         assert_eq!(tokens.last(), Some(&Token::None));
     }
 
@@ -241,16 +236,17 @@ mod handle_string_tests {
         let buf = r#""foo\"bar""#.as_bytes();
         let mut tokens = vec![Token::String(vec![])];
         let mut i = 1;
-        let mut res = String::new();
-        while i < buf.len() {
-            handle_string(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::String(str) = val {
-                    res = str;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_string(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(res, r#"foo\"bar"#);
+        assert_eq!(
+            res,
+            Ok(Some(JsonToken::Val(JsonValue::String(
+                r#"foo\"bar"#.to_string()
+            ))))
+        );
         assert_eq!(tokens.last(), Some(&Token::None));
     }
 }
@@ -264,23 +260,13 @@ mod handle_number_tests {
         let buf = r#"42,"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        while i < buf.len() {
-            handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(num, r#"42"#);
+        let v = JsonToken::Val(JsonValue::Number(r#"42"#.to_string()));
+        assert_eq!(res.unwrap(), Some((v, None)));
         assert_eq!(tokens.last(), Some(&Token::Comma));
     }
 
@@ -289,23 +275,13 @@ mod handle_number_tests {
         let buf = r#"42.123,"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        while i < buf.len() {
-            handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(num, r#"42.123"#);
+        let v = JsonToken::Val(JsonValue::Number(r#"42.123"#.to_string()));
+        assert_eq!(res.unwrap(), Some((v, None)));
         assert_eq!(tokens.last(), Some(&Token::Comma));
     }
 
@@ -314,23 +290,13 @@ mod handle_number_tests {
         let buf = r#"42e-123,"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        while i < buf.len() {
-            handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(num, r#"42e-123"#);
+        let v = JsonToken::Val(JsonValue::Number(r#"42e-123"#.to_string()));
+        assert_eq!(res.unwrap(), Some((v, None)));
         assert_eq!(tokens.last(), Some(&Token::Comma));
     }
 
@@ -339,23 +305,13 @@ mod handle_number_tests {
         let buf = r#"42}"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        while i < buf.len() {
-            handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(num, r#"42"#);
+        let v = JsonToken::Val(JsonValue::Number(r#"42"#.to_string()));
+        assert_eq!(res.unwrap(), Some((v, Some(JsonToken::ObjEnd))));
         assert_eq!(tokens.last(), Some(&Token::None));
     }
 
@@ -364,23 +320,13 @@ mod handle_number_tests {
         let buf = r#"42]"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        while i < buf.len() {
-            handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
-        assert_eq!(num, r#"42"#);
+        let v = JsonToken::Val(JsonValue::Number(r#"42"#.to_string()));
+        assert_eq!(res.unwrap(), Some((v, Some(JsonToken::ArrEnd))));
         assert_eq!(tokens.last(), Some(&Token::None));
     }
 
@@ -389,26 +335,14 @@ mod handle_number_tests {
         let buf = r#"42b"#.as_bytes();
         let mut tokens = vec![Token::Number(vec![])];
         let mut i = 0;
-        let mut num = String::new();
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_number(
-                buf,
-                i,
-                &mut tokens,
-                |val: JsonValue| {
-                    if let JsonValue::Number(str) = val {
-                        num = str;
-                    }
-                },
-                || {},
-                || {},
-            );
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_number(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 2,
                 code: ErrorCode::InvalidNumber
             })
@@ -422,43 +356,31 @@ mod handle_null {
 
     #[test]
     fn should_parse_null() {
-        let buf = r#"null,"#.as_bytes();
+        let buf = r#"null"#.as_bytes();
         let mut tokens = vec![Token::Null(vec![b'n'])];
         let mut i = 1;
-        let mut is_null = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_null(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Null = val {
-                    is_null = true;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_null(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(is_null);
         assert_eq!(tokens.last(), Some(&Token::None));
-        assert_eq!(error, None);
+        assert_eq!(res.unwrap(), Some(JsonToken::Val(JsonValue::Null)));
     }
 
     #[test]
     fn should_return_error() {
-        let buf = r#"nil,"#.as_bytes();
+        let buf = r#"nil"#.as_bytes();
         let mut tokens = vec![Token::Null(vec![b'n'])];
         let mut i = 1;
-        let mut is_null = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_null(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Null = val {
-                    is_null = true;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_null(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(!is_null);
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 1,
                 code: ErrorCode::ExpectedNull
             })
@@ -472,43 +394,31 @@ mod handle_true {
 
     #[test]
     fn should_parse_true() {
-        let buf = r#"true,"#.as_bytes();
+        let buf = r#"true"#.as_bytes();
         let mut tokens = vec![Token::True(vec![b't'])];
         let mut i = 1;
-        let mut is_true = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_true(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Bool(b) = val {
-                    is_true = b;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_true(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(is_true);
         assert_eq!(tokens.last(), Some(&Token::None));
-        assert_eq!(error, None);
+        assert_eq!(res.unwrap(), Some(JsonToken::Val(JsonValue::Bool(true))));
     }
 
     #[test]
     fn should_return_error() {
-        let buf = r#"truE,"#.as_bytes();
+        let buf = r#"truE"#.as_bytes();
         let mut tokens = vec![Token::True(vec![b't'])];
         let mut i = 1;
-        let mut is_true = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_true(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Bool(b) = val {
-                    is_true = b;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_true(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(!is_true);
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 3,
                 code: ErrorCode::ExpectedTrue
             })
@@ -522,22 +432,16 @@ mod handle_false {
 
     #[test]
     fn should_parse_false() {
-        let buf = r#"false,"#.as_bytes();
+        let buf = r#"false"#.as_bytes();
         let mut tokens = vec![Token::False(vec![b'f'])];
         let mut i = 1;
-        let mut is_false = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_false(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Bool(false) = val {
-                    is_false = true;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_false(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(is_false);
         assert_eq!(tokens.last(), Some(&Token::None));
-        assert_eq!(error, None);
+        assert_eq!(res.unwrap(), Some(JsonToken::Val(JsonValue::Bool(false))));
     }
 
     #[test]
@@ -545,20 +449,14 @@ mod handle_false {
         let buf = r#"falz,"#.as_bytes();
         let mut tokens = vec![Token::False(vec![b'f'])];
         let mut i = 1;
-        let mut is_false = false;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_false(buf, i, &mut tokens, |val: JsonValue| {
-                if let JsonValue::Bool(false) = val {
-                    is_false = true;
-                }
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_false(buf, i, &mut tokens);
             i += 1;
         }
-        assert!(!is_false);
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 3,
                 code: ErrorCode::ExpectedFalse
             })

@@ -1,73 +1,65 @@
 use std::str;
 
-use crate::constants::{EMPTY_CHAR_SET};
+use crate::constants::EMPTY_CHAR_SET;
 use crate::error::{Error, ErrorCode};
+use crate::json_token::JsonToken;
 use crate::token::*;
 
 const KEY_MAX_LEN: usize = 100;
 
-pub(crate) fn handle_key<F>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_key: F,
-) -> Option<Error>
-where
-    F: FnMut(&str),
-{
-    let mut error: Option<Error> = None;
+type Res = Result<Option<JsonToken>, Error>;
+
+pub(crate) fn handle_key(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match tokens.last_mut() {
-        Some(Token::Key(ref mut data)) if data.len() > KEY_MAX_LEN => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::TooLongKey,
-            })
-        }
+        Some(Token::Key(ref mut data)) if data.len() > KEY_MAX_LEN => Err(Error {
+            column: i,
+            code: ErrorCode::TooLongKey,
+        }),
         Some(Token::Key(ref mut data)) => match buf[i] {
             // escaped character \"
-            b'"' if data.last() == Some(&b'\\') => data.push(b'"'),
-            b'"' => {
-                let key = str::from_utf8(&data).unwrap();
-                on_key(key);
-                tokens.push(Token::AfterKey);
+            b'"' if data.last() == Some(&b'\\') => {
+                data.push(b'"');
+                Ok(None)
             }
-            ch => data.push(ch),
+            b'"' => match str::from_utf8(&data) {
+                Ok(key) => {
+                    let val = JsonToken::Key(key.to_string());
+                    tokens.push(Token::AfterKey);
+                    Ok(Some(val))
+                }
+                Err(err) => Err(Error {
+                    column: i,
+                    code: ErrorCode::InvalidFormat,
+                }),
+            },
+            ch => {
+                data.push(ch);
+                Ok(None)
+            }
         },
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::InvalidFormat,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::InvalidFormat,
+        }),
     }
-    error
 }
 
-pub(crate) fn handle_obj<F>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_end: F,
-) -> Option<Error>
-where
-    F: FnMut(),
-{
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_obj(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match buf[i] {
-        b'"' => tokens.push(Token::Key(vec![])),
-        ch if EMPTY_CHAR_SET.contains(&ch) => {}
+        b'"' => {
+            tokens.push(Token::Key(vec![]));
+            Ok(None)
+        }
+        ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
         b'}' => {
             handle_end_obj(tokens);
-            on_obj_end();
+            Ok(Some(JsonToken::ObjEnd))
         }
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::ExpectedKey,
-            })
-        }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::ExpectedKey,
+        }),
     }
-    error
 }
 
 fn handle_end_obj(tokens: &mut Vec<Token>) {
@@ -79,30 +71,25 @@ fn handle_end_obj(tokens: &mut Vec<Token>) {
     tokens.push(Token::None);
 }
 
-pub(crate) fn handle_after_key(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Option<Error> {
-    let mut error: Option<Error> = None;
+pub(crate) fn handle_after_key(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match tokens.last_mut() {
         Some(Token::AfterKey) => match buf[i] {
             b':' => {
                 tokens.pop();
                 tokens.push(Token::Colon);
+                Ok(None)
             }
-            ch if EMPTY_CHAR_SET.contains(&ch) => {}
-            _ => {
-                error = Some(Error {
-                    column: i,
-                    code: ErrorCode::ExpectedColon,
-                })
-            }
-        },
-        _ => {
-            error = Some(Error {
+            ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
+            _ => Err(Error {
                 column: i,
-                code: ErrorCode::InvalidFormat,
-            })
-        }
+                code: ErrorCode::ExpectedColon,
+            }),
+        },
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::InvalidFormat,
+        }),
     }
-    error
 }
 
 #[cfg(test)]
@@ -115,16 +102,15 @@ mod test_handle_key {
         let mut tokens = vec![Token::Key(vec![])];
         let mut key = String::new();
         let mut i = 1;
-        while i < buf.len() {
-            handle_key(buf, i, &mut tokens, |str: &str| {
-                key = str.to_string();
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_key(buf, i, &mut tokens);
             i += 1;
         }
 
         assert_eq!(tokens.pop(), Some(Token::AfterKey));
         assert_eq!(tokens.pop(), Some(Token::Key("foo".as_bytes().to_vec())));
-        assert_eq!(key, String::from("foo"));
+        assert_eq!(res.unwrap(), Some(JsonToken::Key("foo".to_string())));
     }
 
     #[test]
@@ -133,10 +119,9 @@ mod test_handle_key {
         let mut tokens = vec![Token::Key(vec![])];
         let mut key = String::new();
         let mut i = 1;
-        while i < buf.len() {
-            handle_key(buf, i, &mut tokens, |str: &str| {
-                key = str.to_string();
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_key(buf, i, &mut tokens);
             i += 1;
         }
 
@@ -145,7 +130,10 @@ mod test_handle_key {
             tokens.pop(),
             Some(Token::Key(r#"foo\"bar"#.as_bytes().to_vec()))
         );
-        assert_eq!(key, String::from(r#"foo\"bar"#));
+        assert_eq!(
+            res.unwrap(),
+            Some(JsonToken::Key(r#"foo\"bar"#.to_string()))
+        );
     }
 
     #[test]
@@ -162,16 +150,14 @@ mod test_handle_key {
         let mut tokens = vec![Token::Key(vec![])];
         let mut key = String::new();
         let mut i = 1;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_key(buf, i, &mut tokens, |str: &str| {
-                key = str.to_string();
-            });
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_key(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: i - 1,
                 code: ErrorCode::TooLongKey
             })
@@ -184,14 +170,14 @@ mod test_handle_key {
         // Let's assign any token that is not Key.
         let mut tokens = vec![Token::None];
         let mut i = 1;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_key(buf, i, &mut tokens, |_str: &str| {});
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_key(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 1,
                 code: ErrorCode::InvalidFormat
             })
@@ -209,7 +195,7 @@ mod obj_tests {
         let mut tokens = vec![Token::Obj];
         let mut i = 1;
         while i < buf.len() && tokens.last() == Some(&Token::Obj) {
-            handle_obj(buf, i, &mut tokens, || {});
+            handle_obj(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(tokens.pop(), Some(Token::Key(vec![])));
@@ -223,14 +209,14 @@ mod obj_tests {
 
         let mut tokens = vec![Token::Obj];
         let mut i = 1;
-        let mut error = None;
-        while i < buf.len() && error.is_none() {
-            error = handle_obj(buf, i, &mut tokens, || {});
+        let mut res = Ok(None);
+        while i < buf.len() && res.is_ok() {
+            res = handle_obj(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 5,
                 code: ErrorCode::ExpectedKey
             })
@@ -271,14 +257,14 @@ mod obj_after_key {
             Token::AfterKey,
         ];
         let mut i = 6;
-        let mut error = None;
-        while i < buf.len() && tokens.last() == Some(&Token::AfterKey) && error.is_none() {
-            error = handle_after_key(buf, i, &mut tokens);
+        let mut res = Ok(None);
+        while i < buf.len() && tokens.last() == Some(&Token::AfterKey) && res.is_ok() {
+            res = handle_after_key(buf, i, &mut tokens);
             i += 1;
         }
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 7,
                 code: ErrorCode::ExpectedColon
             })

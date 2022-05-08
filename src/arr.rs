@@ -1,48 +1,50 @@
 use crate::constants::{DIGIT_CHAR_SET, EMPTY_CHAR_SET};
 use crate::error::{Error, ErrorCode};
+use crate::json_token::JsonToken;
 use crate::token::*;
 
-pub(crate) fn handle_arr<F1, F2, F3>(
-    buf: &[u8],
-    i: usize,
-    tokens: &mut Vec<Token>,
-    mut on_obj_beg: F1,
-    mut on_arr_beg: F2,
-    mut on_arr_end: F3,
-) -> Option<Error>
-where
-    F1: FnMut(),
-    F2: FnMut(),
-    F3: FnMut(),
-{
-    let mut error: Option<Error> = None;
+type Res = Result<Option<JsonToken>, Error>;
+
+pub(crate) fn handle_arr(buf: &[u8], i: usize, tokens: &mut Vec<Token>) -> Res {
     match buf[i] {
-        b'n' => tokens.push(Token::Null(vec![b'n'])),
-        b't' => tokens.push(Token::True(vec![b't'])),
-        b'f' => tokens.push(Token::False(vec![b'f'])),
-        b'"' => tokens.push(Token::String(vec![])),
+        b'n' => {
+            tokens.push(Token::Null(vec![b'n']));
+            Ok(None)
+        }
+        b't' => {
+            tokens.push(Token::True(vec![b't']));
+            Ok(None)
+        }
+        b'f' => {
+            tokens.push(Token::False(vec![b'f']));
+            Ok(None)
+        }
+        b'"' => {
+            tokens.push(Token::String(vec![]));
+            Ok(None)
+        }
         b'{' => {
             tokens.push(Token::Obj);
-            on_obj_beg();
+            Ok(Some(JsonToken::ObjBeg))
         }
         b'[' => {
             tokens.push(Token::Arr);
-            on_arr_beg();
+            Ok(Some(JsonToken::ArrBeg))
         }
         b']' => {
             handle_end_arr(tokens);
-            on_arr_end();
+            Ok(Some(JsonToken::ArrEnd))
         }
-        ch if EMPTY_CHAR_SET.contains(&ch) => {}
-        ch if DIGIT_CHAR_SET.contains(&ch) => tokens.push(Token::Number(vec![ch])),
-        _ => {
-            error = Some(Error {
-                column: i,
-                code: ErrorCode::InvalidArrFormat,
-            })
+        ch if EMPTY_CHAR_SET.contains(&ch) => Ok(None),
+        ch if DIGIT_CHAR_SET.contains(&ch) => {
+            tokens.push(Token::Number(vec![ch]));
+            Ok(None)
         }
+        _ => Err(Error {
+            column: i,
+            code: ErrorCode::InvalidArrFormat,
+        }),
     }
-    error
 }
 
 fn handle_end_arr(tokens: &mut Vec<Token>) {
@@ -64,10 +66,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[null]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::Null(vec![b'n'])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -76,10 +78,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[true]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::True(vec![b't'])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -88,10 +90,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[false]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::False(vec![b'f'])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -100,10 +102,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[\"false\"]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::String(vec![])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -112,10 +114,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[42]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::Number(vec![b'4'])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -124,10 +126,10 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[-42]".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::Number(vec![b'-'])));
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(None));
     }
 
     #[test]
@@ -136,25 +138,9 @@ mod handle_array_tests {
 
         let buf: &[u8] = "[[42]]".as_bytes();
         let i = 1;
-        let mut arr = 0;
-        let mut obj = 0;
-        let error = handle_arr(
-            buf,
-            i,
-            &mut tokens,
-            || {
-                obj += 1;
-            },
-            || {
-                arr += 1;
-            },
-            || {},
-        );
-
+        let res = handle_arr(buf, i, &mut tokens);
         assert_eq!(tokens.pop(), Some(Token::Arr));
-        assert_eq!(arr, 1);
-        assert_eq!(obj, 0);
-        assert_eq!(error, None);
+        assert_eq!(res, Ok(Some(JsonToken::ArrBeg)));
     }
 
     #[test]
@@ -162,25 +148,10 @@ mod handle_array_tests {
         let mut tokens = vec![Token::Arr];
         let buf: &[u8] = "[{}]".as_bytes();
         let i = 1;
-        let mut arr = 0;
-        let mut obj = 0;
-        let error = handle_arr(
-            buf,
-            i,
-            &mut tokens,
-            || {
-                obj += 1;
-            },
-            || {
-                arr += 1;
-            },
-            || {},
-        );
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(tokens.pop(), Some(Token::Obj));
-        assert_eq!(arr, 0);
-        assert_eq!(obj, 1);
-        assert_eq!(error, None);
+        assert_eq!(res.unwrap(), Some(JsonToken::ObjBeg));
     }
 
     #[test]
@@ -188,11 +159,11 @@ mod handle_array_tests {
         let mut tokens = vec![Token::Arr];
         let buf: &[u8] = "[}".as_bytes();
         let i = 1;
-        let error = handle_arr(buf, i, &mut tokens, || {}, || {}, || {});
+        let res = handle_arr(buf, i, &mut tokens);
 
         assert_eq!(
-            error,
-            Some(Error {
+            res,
+            Err(Error {
                 column: 1,
                 code: ErrorCode::InvalidArrFormat
             })

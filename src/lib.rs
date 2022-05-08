@@ -8,6 +8,7 @@ mod arr;
 mod constants;
 pub mod error;
 pub mod json_stream_reader;
+pub mod json_token;
 pub mod json_value;
 mod obj;
 mod other;
